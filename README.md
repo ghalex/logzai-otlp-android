@@ -8,9 +8,29 @@ This is the **v1 core**: logs + spans only. No plugins, no AI/gen-ai integration
 
 ## Install
 
-The library is an Android AAR (`com.android.library`). Add the `:logzai` module (or its
-published coordinates once available) to your app and ensure your app declares the
-`INTERNET` permission (the library already merges it in).
+Published to Maven Central — no extra repository needed (`mavenCentral()` is already in
+every Android project).
+
+`gradle/libs.versions.toml`:
+
+```toml
+[versions]
+logzai = "0.1.0"
+
+[libraries]
+logzai-otlp-android = { group = "com.logzai", name = "logzai-otlp-android", version.ref = "logzai" }
+```
+
+Module `build.gradle.kts`:
+
+```kotlin
+dependencies {
+    implementation(libs.logzai.otlp.android)
+}
+```
+
+The library declares the `INTERNET` permission and merges it into your app. See
+[PUBLISHING.md](PUBLISHING.md) for how releases are cut.
 
 ## Usage
 

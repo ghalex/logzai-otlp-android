@@ -1,5 +1,6 @@
 plugins {
     alias(libs.plugins.android.library)
+    alias(libs.plugins.maven.publish)
 }
 
 android {
@@ -28,6 +29,18 @@ android {
 
 kotlin {
     jvmToolchain(17)
+}
+
+// Coordinates, version, and POM metadata are read from gradle.properties
+// (GROUP, VERSION_NAME, POM_*). The Android release variant — with sources and
+// javadoc jars — is published by default.
+mavenPublishing {
+    publishToMavenCentral()
+    // Only sign when a key is available (i.e. in CI). Lets local publishToMavenLocal
+    // run unsigned for testing against other projects via mavenLocal().
+    if (project.findProperty("signingInMemoryKey") != null) {
+        signAllPublications()
+    }
 }
 
 dependencies {
