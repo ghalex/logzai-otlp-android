@@ -1,0 +1,20 @@
+[versions]
+agp = "9.2.1"
+kotlin = "2.2.10"
+opentelemetry = "1.62.0"
+junit = "4.13.2"
+mockwebserver = "5.3.2"
+robolectric = "4.14.1"
+
+[libraries]
+opentelemetry-bom = { group = "io.opentelemetry", name = "opentelemetry-bom", version.ref = "opentelemetry" }
+opentelemetry-api = { group = "io.opentelemetry", name = "opentelemetry-api" }
+opentelemetry-sdk = { group = "io.opentelemetry", name = "opentelemetry-sdk" }
+opentelemetry-exporter-otlp = { group = "io.opentelemetry", name = "opentelemetry-exporter-otlp" }
+
+junit = { group = "junit", name = "junit", version.ref = "junit" }
+mockwebserver = { group = "com.squareup.okhttp3", name = "mockwebserver", version.ref = "mockwebserver" }
+robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
+
+[plugins]
+android-library = { id = "com.android.library", version.ref = "agp" }
