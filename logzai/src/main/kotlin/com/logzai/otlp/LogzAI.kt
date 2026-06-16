@@ -17,6 +17,7 @@ import io.opentelemetry.sdk.resources.Resource
 import io.opentelemetry.sdk.trace.SdkTracerProvider
 import io.opentelemetry.sdk.trace.export.BatchSpanProcessor
 import java.time.Duration
+import java.time.Instant
 import java.util.concurrent.TimeUnit
 
 private const val TAG = "LogzAI"
@@ -156,6 +157,11 @@ class LogzAI {
             Log.println(level.logcatPriority, p.serviceName, message)
         }
         p.logger.logRecordBuilder()
+            // Set the event timestamp explicitly: without it the SDK exports
+            // `time_unix_nano = 0`, and the ingest stores the log under 1970 (it reads
+            // time_unix_nano with no fallback to observed_time_unix_nano), so it never
+            // shows up in a recent-time view.
+            .setTimestamp(Instant.now())
             .setBody(message)
             .setSeverity(level.severity)
             .setSeverityText(level.name)

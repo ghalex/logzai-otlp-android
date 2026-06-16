@@ -15,7 +15,7 @@ every Android project).
 
 ```toml
 [versions]
-logzai = "0.1.0"
+logzai = "0.1.1"
 
 [libraries]
 logzai-otlp-android = { group = "com.logzai", name = "logzai-otlp-android", version.ref = "logzai" }
