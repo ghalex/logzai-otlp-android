@@ -15,7 +15,7 @@ every Android project).
 
 ```toml
 [versions]
-logzai = "0.1.1"
+logzai = "0.2.0"
 
 [libraries]
 logzai-otlp-android = { group = "com.logzai", name = "logzai-otlp-android", version.ref = "logzai" }
@@ -75,6 +75,35 @@ Logzai.span("order-processing", mapOf("orderId" to "order-456")) { span ->
 Logzai.shutdown()
 ```
 
+### Suspending spans (coroutines)
+
+The synchronous `span { ... }` can't wrap suspending code (its block isn't a `suspend`
+lambda) and its span is made current via a thread-local, which does not follow a coroutine
+across suspension points. For long-running suspend operations — e.g. a payment that suspends
+across Room DB and a card-terminal call — use `spanSuspending`:
+
+```kotlin
+// block is a suspend lambda; the span's duration covers the whole suspending operation.
+suspend fun chargeOrder(orderId: String): Receipt =
+    Logzai.spanSuspending("payment", mapOf("orderId" to orderId)) { span ->
+        Logzai.info("Charging card")          // carries the span's trace_id/span_id
+        val auth = cardTerminal.authorize()   // suspends, may resume on another thread
+        db.recordPayment(auth)                // suspends again
+        Logzai.info("Payment recorded")       // still correlated to the span
+        Receipt(auth)
+    }
+```
+
+`spanSuspending` runs the block inside `withContext(span.asContextElement())`, so the span
+stays the current OpenTelemetry context on every thread the coroutine resumes on — logs
+emitted after a suspension keep their `trace_id`/`span_id`. It never blocks the calling
+thread (no `runBlocking`). On exception it records the throwable, marks the span
+`StatusCode.ERROR`, and rethrows; the span is always ended.
+
+> It's a distinct name (not an overload of `span`) on purpose: a plain lambda coerces to both
+> `(Span) -> T` and `suspend (Span) -> T`, so overloading would make every existing
+> `span(name) { ... }` call ambiguous.
+
 Use the `Logzai` object for the process-wide singleton, or construct your own `LogzAI()`
 instance if you need several independent pipelines.
 
@@ -95,9 +124,22 @@ Device/app attributes (`service.version`, `os.version`, `device.model`,
 
 ## Notes
 
-- Spans are synchronous in v1 — `span { ... }` runs the block on the calling thread.
+- `span { ... }` is synchronous — it runs the block on the calling thread. For suspending
+  operations use `spanSuspending { ... }` (see [Suspending spans](#suspending-spans-coroutines)).
 - `shutdown()` is caller-driven; call it when the app is going away to flush the
   in-memory batch (logs/spans are not persisted across process death).
+
+## Changelog
+
+### 0.2.0
+
+- Add `spanSuspending(name, attributes) { ... }` — a coroutine-aware span whose duration
+  covers a whole suspending operation and whose context follows the coroutine across
+  dispatcher hops, so logs emitted after a suspension stay correlated to the span.
+
+### 0.1.1
+
+- v1 core: logs + spans over OTLP/HTTP.
 
 [`logzai-otlp-py`]: ../logzai-otlp-py
 [`logzai-otlp-js`]: ../logzai-otlp-js

@@ -32,5 +32,16 @@ object Logzai {
     fun <T> span(name: String, attributes: Map<String, Any> = emptyMap(), block: (Span) -> T): T =
         delegate.span(name, attributes, block)
 
+    /**
+     * Coroutine-aware sibling of [span]: wraps a suspending [block] in a span whose duration
+     * covers the whole suspending operation, propagating the span across dispatcher hops so
+     * logs emitted inside it keep the span's `trace_id`/`span_id`. See [LogzAI.spanSuspending].
+     */
+    suspend fun <T> spanSuspending(
+        name: String,
+        attributes: Map<String, Any> = emptyMap(),
+        block: suspend (Span) -> T,
+    ): T = delegate.spanSuspending(name, attributes, block)
+
     fun shutdown() = delegate.shutdown()
 }

@@ -11,11 +11,14 @@ import io.opentelemetry.api.trace.StatusCode
 import io.opentelemetry.api.trace.Tracer
 import io.opentelemetry.exporter.otlp.http.logs.OtlpHttpLogRecordExporter
 import io.opentelemetry.exporter.otlp.http.trace.OtlpHttpSpanExporter
+import io.opentelemetry.extension.kotlin.asContextElement
+import io.opentelemetry.sdk.logs.LogRecordProcessor
 import io.opentelemetry.sdk.logs.SdkLoggerProvider
 import io.opentelemetry.sdk.logs.export.BatchLogRecordProcessor
 import io.opentelemetry.sdk.resources.Resource
 import io.opentelemetry.sdk.trace.SdkTracerProvider
 import io.opentelemetry.sdk.trace.export.BatchSpanProcessor
+import kotlinx.coroutines.withContext
 import java.time.Duration
 import java.time.Instant
 import java.util.concurrent.TimeUnit
@@ -44,7 +47,19 @@ class LogzAI {
     @Volatile
     private var pipeline: Pipeline? = null
 
-    fun init(context: Context, options: LogzaiOptions) {
+    fun init(context: Context, options: LogzaiOptions) =
+        init(context, options, extraLogProcessor = null)
+
+    /**
+     * Test seam: lets a test attach an extra [LogRecordProcessor] (e.g. a capturing one) so it
+     * can inspect the records this client emits without decoding the exported protobuf. The
+     * public [init] delegates here with no extra processor.
+     */
+    internal fun init(
+        context: Context,
+        options: LogzaiOptions,
+        extraLogProcessor: LogRecordProcessor?,
+    ) {
         if (pipeline != null) {
             Log.w(TAG, "LogzAI.init called more than once; ignoring.")
             return
@@ -87,6 +102,7 @@ class LogzAI {
                     .setExporterTimeout(timeout)
                     .build(),
             )
+            .apply { extraLogProcessor?.let { addLogRecordProcessor(it) } }
             .build()
 
         pipeline = Pipeline(
@@ -139,6 +155,45 @@ class LogzAI {
         }
     }
 
+    /**
+     * Coroutine-aware sibling of [span]: wraps a **suspending** [block] in a span whose
+     * duration covers the whole suspending operation.
+     *
+     * Given a distinct name rather than overloading [span], because a plain lambda coerces to
+     * both `(Span) -> T` and `suspend (Span) -> T`, which makes `span(name, attrs) { ... }`
+     * ambiguous at every existing (synchronous) call site.
+     *
+     * Unlike [span] (which makes the span current via a thread-local), this runs [block] inside
+     * `withContext(span.asContextElement())`, so the span is the current OpenTelemetry
+     * [io.opentelemetry.context.Context] on every thread the coroutine resumes on. Logs emitted
+     * via [info]/[warn]/[error]/[exception] after a suspension therefore still carry the span's
+     * `trace_id`/`span_id`, even when the coroutine hops dispatchers.
+     *
+     * Does not block the calling thread (no `runBlocking`). On exception the span is marked
+     * [StatusCode.ERROR] and the throwable rethrown; the span is always ended.
+     */
+    suspend fun <T> spanSuspending(
+        name: String,
+        attributes: Map<String, Any> = emptyMap(),
+        block: suspend (Span) -> T,
+    ): T {
+        val p = pipeline ?: return block(Span.getInvalid())
+        val span = p.tracer.spanBuilder(name)
+            .setAllAttributes(attributes.toAttributes())
+            .startSpan()
+        return try {
+            withContext(span.asContextElement()) {
+                block(span)
+            }
+        } catch (t: Throwable) {
+            span.recordException(t)
+            span.setStatus(StatusCode.ERROR, t.message ?: t.javaClass.simpleName)
+            throw t
+        } finally {
+            span.end()
+        }
+    }
+
     fun shutdown() {
         val p = pipeline ?: return
         pipeline = null
@@ -157,6 +212,12 @@ class LogzAI {
             Log.println(level.logcatPriority, p.serviceName, message)
         }
         p.logger.logRecordBuilder()
+            // Stamp the active OpenTelemetry Context onto the record so logs emitted inside a
+            // span carry its trace_id/span_id. The SDK already defaults to Context.current()
+            // at emit time; we set it explicitly so this correlation is a guarantee of *this*
+            // code (and survives the dispatcher hops of the coroutine-aware `span` overload,
+            // which makes the span current via withContext(span.asContextElement())).
+            .setContext(io.opentelemetry.context.Context.current())
             // Set the event timestamp explicitly: without it the SDK exports
             // `time_unix_nano = 0`, and the ingest stores the log under 1970 (it reads
             // time_unix_nano with no fallback to observed_time_unix_nano), so it never
