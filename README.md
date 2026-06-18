@@ -15,7 +15,7 @@ every Android project).
 
 ```toml
 [versions]
-logzai = "0.2.0"
+logzai = "0.2.1"
 
 [libraries]
 logzai-otlp-android = { group = "com.logzai", name = "logzai-otlp-android", version.ref = "logzai" }
@@ -130,6 +130,13 @@ Device/app attributes (`service.version`, `os.version`, `device.model`,
   in-memory batch (logs/spans are not persisted across process death).
 
 ## Changelog
+
+### 0.2.1
+
+- `init()` never throws: a misconfiguration (e.g. a blank/malformed `ingestEndpoint`) is
+  caught and logged, and telemetry is disabled rather than crashing the host app. After a
+  failed or absent init, `span`/`spanSuspending` still run their block and the log methods
+  drop silently — using the library can never crash an app because tracing isn't working.
 
 ### 0.2.0
 

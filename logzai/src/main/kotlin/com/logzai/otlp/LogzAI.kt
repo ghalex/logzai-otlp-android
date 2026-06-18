@@ -65,54 +65,62 @@ class LogzAI {
             return
         }
 
-        val resource = buildResource(context.applicationContext, options)
-        val timeout = Duration.ofMillis(options.timeoutMillis)
+        // Never let a misconfiguration (e.g. a blank/malformed ingestEndpoint, which makes the
+        // OTLP exporter's setEndpoint throw) crash the host app from Application.onCreate(). On
+        // failure we leave `pipeline` null, so every span/spanSuspending/log/shutdown call
+        // downstream degrades to a no-op rather than throwing.
+        try {
+            val resource = buildResource(context.applicationContext, options)
+            val timeout = Duration.ofMillis(options.timeoutMillis)
 
-        val spanExporter = OtlpHttpSpanExporter.builder()
-            .setEndpoint(tracesUrl(options.ingestEndpoint))
-            .addHeader("x-ingest-token", options.ingestToken)
-            .setTimeout(timeout)
-            .build()
+            val spanExporter = OtlpHttpSpanExporter.builder()
+                .setEndpoint(tracesUrl(options.ingestEndpoint))
+                .addHeader("x-ingest-token", options.ingestToken)
+                .setTimeout(timeout)
+                .build()
 
-        val logExporter = OtlpHttpLogRecordExporter.builder()
-            .setEndpoint(logsUrl(options.ingestEndpoint))
-            .addHeader("x-ingest-token", options.ingestToken)
-            .setTimeout(timeout)
-            .build()
+            val logExporter = OtlpHttpLogRecordExporter.builder()
+                .setEndpoint(logsUrl(options.ingestEndpoint))
+                .addHeader("x-ingest-token", options.ingestToken)
+                .setTimeout(timeout)
+                .build()
 
-        val tracerProvider = SdkTracerProvider.builder()
-            .setResource(resource)
-            .addSpanProcessor(
-                BatchSpanProcessor.builder(spanExporter)
-                    .setMaxQueueSize(MAX_QUEUE_SIZE)
-                    .setMaxExportBatchSize(MAX_EXPORT_BATCH_SIZE)
-                    .setScheduleDelay(SCHEDULE_DELAY)
-                    .setExporterTimeout(timeout)
-                    .build(),
+            val tracerProvider = SdkTracerProvider.builder()
+                .setResource(resource)
+                .addSpanProcessor(
+                    BatchSpanProcessor.builder(spanExporter)
+                        .setMaxQueueSize(MAX_QUEUE_SIZE)
+                        .setMaxExportBatchSize(MAX_EXPORT_BATCH_SIZE)
+                        .setScheduleDelay(SCHEDULE_DELAY)
+                        .setExporterTimeout(timeout)
+                        .build(),
+                )
+                .build()
+
+            val loggerProvider = SdkLoggerProvider.builder()
+                .setResource(resource)
+                .addLogRecordProcessor(
+                    BatchLogRecordProcessor.builder(logExporter)
+                        .setMaxQueueSize(MAX_QUEUE_SIZE)
+                        .setMaxExportBatchSize(MAX_EXPORT_BATCH_SIZE)
+                        .setScheduleDelay(SCHEDULE_DELAY)
+                        .setExporterTimeout(timeout)
+                        .build(),
+                )
+                .apply { extraLogProcessor?.let { addLogRecordProcessor(it) } }
+                .build()
+
+            pipeline = Pipeline(
+                tracerProvider = tracerProvider,
+                loggerProvider = loggerProvider,
+                tracer = tracerProvider.get(INSTRUMENTATION_SCOPE),
+                logger = loggerProvider.get(INSTRUMENTATION_SCOPE),
+                serviceName = options.serviceName,
+                mirrorToConsole = options.mirrorToConsole,
             )
-            .build()
-
-        val loggerProvider = SdkLoggerProvider.builder()
-            .setResource(resource)
-            .addLogRecordProcessor(
-                BatchLogRecordProcessor.builder(logExporter)
-                    .setMaxQueueSize(MAX_QUEUE_SIZE)
-                    .setMaxExportBatchSize(MAX_EXPORT_BATCH_SIZE)
-                    .setScheduleDelay(SCHEDULE_DELAY)
-                    .setExporterTimeout(timeout)
-                    .build(),
-            )
-            .apply { extraLogProcessor?.let { addLogRecordProcessor(it) } }
-            .build()
-
-        pipeline = Pipeline(
-            tracerProvider = tracerProvider,
-            loggerProvider = loggerProvider,
-            tracer = tracerProvider.get(INSTRUMENTATION_SCOPE),
-            logger = loggerProvider.get(INSTRUMENTATION_SCOPE),
-            serviceName = options.serviceName,
-            mirrorToConsole = options.mirrorToConsole,
-        )
+        } catch (t: Throwable) {
+            Log.e(TAG, "LogzAI.init failed; telemetry is disabled (calls will no-op).", t)
+        }
     }
 
     fun debug(message: String, attributes: Map<String, Any> = emptyMap()) =
